@@ -507,6 +507,7 @@
           "text": "All",
           "value": "__all"
         },
+        "allValue": "__all",
         "datasource": {
           "type": "postgres",
           "uid": "portfolio-postgres"
@@ -518,10 +519,7 @@
         "multi": false,
         "name": "account_label",
         "options": [],
-        "query": {
-          "query": "select '__all' as __value, 'All' as __text union all select distinct account_label as __value, account_label as __text from positions where account_label is not null order by __text;",
-          "refId": "StandardVariableQuery"
-        },
+        "query": "select '__all' as __value, 'All' as __text union all select distinct account_label as __value, account_label as __text from positions where account_label is not null order by __text;",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
