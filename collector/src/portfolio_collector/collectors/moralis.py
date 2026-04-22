@@ -29,6 +29,13 @@ def _list_payload(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _json_or_text(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return {"text": response.text}
+
+
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -125,9 +132,6 @@ class MoralisCollector(Collector):
             for token in _list_payload(payload):
                 should_filter, filter_reason = _should_filter_evm_token(token)
                 if should_filter:
-                    result.warnings.append(
-                        f"filtered evm token {chain}:{token.get('symbol') or token.get('token_address')} reason={filter_reason}"
-                    )
                     continue
 
                 amount = decimal_or_none(token.get("balance_formatted")) or compute_amount(
@@ -197,10 +201,29 @@ class MoralisCollector(Collector):
                 break
 
         if wallet.include_defi:
-            defi_summary, status = await self._get_evm(
-                f"/wallets/{wallet.address}/defi/summary",
-                params={"chain": chain},
-            )
+            try:
+                defi_summary, status = await self._get_evm(
+                    f"/wallets/{wallet.address}/defi/summary",
+                    params={"chain": chain},
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 400:
+                    LOG.info("skip moralis defi summary for wallet=%s chain=%s due to http 400", wallet.address, chain)
+                    result.raw_ingestions.append(
+                        RawIngestionRecord(
+                            source_type="onchain",
+                            source="moralis",
+                            account_key=account_key,
+                            account_label=wallet.label,
+                            endpoint=f"/wallets/{wallet.address}/defi/summary",
+                            payload=_json_or_text(exc.response),
+                            request_params={"chain": chain},
+                            http_status=exc.response.status_code,
+                        )
+                    )
+                    return result
+                raise
+
             result.raw_ingestions.append(
                 RawIngestionRecord(
                     source_type="onchain",
@@ -237,10 +260,29 @@ class MoralisCollector(Collector):
                     )
                 )
 
-            defi_positions, status = await self._get_evm(
-                f"/wallets/{wallet.address}/defi/positions",
-                params={"chain": chain},
-            )
+            try:
+                defi_positions, status = await self._get_evm(
+                    f"/wallets/{wallet.address}/defi/positions",
+                    params={"chain": chain},
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 400:
+                    LOG.info("skip moralis defi positions for wallet=%s chain=%s due to http 400", wallet.address, chain)
+                    result.raw_ingestions.append(
+                        RawIngestionRecord(
+                            source_type="onchain",
+                            source="moralis",
+                            account_key=account_key,
+                            account_label=wallet.label,
+                            endpoint=f"/wallets/{wallet.address}/defi/positions",
+                            payload=_json_or_text(exc.response),
+                            request_params={"chain": chain},
+                            http_status=exc.response.status_code,
+                        )
+                    )
+                    return result
+                raise
+
             result.raw_ingestions.append(
                 RawIngestionRecord(
                     source_type="onchain",

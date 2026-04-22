@@ -53,6 +53,7 @@ docker compose up -d --build
 - 地址: `http://<your-vps-ip>:3000`
 - 用户名: `.env` 里的 `GRAFANA_ADMIN_USER`
 - 密码: `.env` 里的 `GRAFANA_ADMIN_PASSWORD`
+- 首次进入后，左侧进入 `Dashboards`，会自动看到 `Portfolio / Portfolio Overview`
 
 4. 手动查看 collector 日志：
 
@@ -61,6 +62,16 @@ docker compose logs -f collector
 ```
 
 ## 推荐 Grafana 查询
+
+项目已预置一个默认 dashboard：
+
+- `Portfolio Overview`
+  - `Latest Total Asset`: 最新一次总资产
+  - `Asset by Address`: 按你配置的地址名称汇总资产
+  - `Total Asset Trend`: 每次快照的总资产趋势
+  - `Latest Positions`: 最新持仓明细
+
+如果你只想直接看网页，不需要先手工建面板。
 
 最新一次采集的总资产按来源汇总：
 
