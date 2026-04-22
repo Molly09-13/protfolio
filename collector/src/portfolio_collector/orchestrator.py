@@ -24,7 +24,7 @@ class Orchestrator:
             if self._settings.debank and self._settings.evm_wallets:
                 collectors.append(DebankCollector(self._settings.debank, self._settings.evm_wallets, client))
             if self._settings.moralis_api_key and self._settings.sol_wallets:
-                collectors.append(MoralisCollector(self._settings, client))
+                collectors.append(MoralisCollector(self._settings, client, collect_evm=False, collect_sol=True))
             if self._settings.binance:
                 collectors.append(BinanceCollector(self._settings.binance, client))
             if self._settings.okx:

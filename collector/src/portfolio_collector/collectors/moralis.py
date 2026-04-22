@@ -70,20 +70,24 @@ def _should_filter_evm_token(token: dict[str, Any]) -> tuple[bool, str | None]:
 class MoralisCollector(Collector):
     name = "moralis"
 
-    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+    def __init__(self, settings: Settings, client: httpx.AsyncClient, *, collect_evm: bool = True, collect_sol: bool = True) -> None:
         self._settings = settings
         self._client = client
+        self._collect_evm = collect_evm
+        self._collect_sol = collect_sol
         self._price_limit = asyncio.Semaphore(5)
 
     async def collect(self) -> CollectionResult:
         result = CollectionResult()
         tasks = []
 
-        for wallet in self._settings.evm_wallets:
-            for chain in wallet.chains:
-                tasks.append(self._collect_evm_wallet(wallet, chain))
-        for wallet in self._settings.sol_wallets:
-            tasks.append(self._collect_sol_wallet(wallet))
+        if self._collect_evm:
+            for wallet in self._settings.evm_wallets:
+                for chain in wallet.chains:
+                    tasks.append(self._collect_evm_wallet(wallet, chain))
+        if self._collect_sol:
+            for wallet in self._settings.sol_wallets:
+                tasks.append(self._collect_sol_wallet(wallet))
 
         if not tasks:
             return result
