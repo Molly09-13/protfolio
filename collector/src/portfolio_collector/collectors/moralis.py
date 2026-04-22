@@ -201,6 +201,7 @@ class MoralisCollector(Collector):
                 break
 
         if wallet.include_defi:
+            skip_defi_positions = False
             try:
                 defi_summary, status = await self._get_evm(
                     f"/wallets/{wallet.address}/defi/summary",
@@ -221,53 +222,72 @@ class MoralisCollector(Collector):
                             http_status=exc.response.status_code,
                         )
                     )
-                    return result
-                raise
+                    skip_defi_positions = True
+                    defi_summary = {}
+                    status = exc.response.status_code
+                else:
+                    raise
 
-            result.raw_ingestions.append(
-                RawIngestionRecord(
-                    source_type="onchain",
-                    source="moralis",
-                    account_key=account_key,
-                    account_label=wallet.label,
-                    endpoint=f"/wallets/{wallet.address}/defi/summary",
-                    payload=defi_summary,
-                    request_params={"chain": chain},
-                    http_status=status,
-                )
-            )
-            for metric_code, raw_value, unit in (
-                ("defi_total_usd_value", defi_summary.get("total_usd_value"), "USD"),
-                ("defi_total_unclaimed_usd_value", defi_summary.get("total_unclaimed_usd_value"), "USD"),
-                ("defi_active_protocols", defi_summary.get("active_protocols"), "count"),
-                ("defi_total_positions", defi_summary.get("total_positions"), "count"),
-            ):
-                metric_value = decimal_or_none(raw_value)
-                if metric_value is None:
-                    continue
-                result.source_summaries.append(
-                    SummaryRecord(
+            if not skip_defi_positions:
+                result.raw_ingestions.append(
+                    RawIngestionRecord(
                         source_type="onchain",
                         source="moralis",
                         account_key=account_key,
                         account_label=wallet.label,
-                        account_type="wallet_defi",
-                        metric_code=metric_code,
-                        metric_unit=unit,
-                        metric_value=metric_value,
-                        collected_at=collected_at,
-                        metadata={"chain": chain, "wallet_address": wallet.address},
+                        endpoint=f"/wallets/{wallet.address}/defi/summary",
+                        payload=defi_summary,
+                        request_params={"chain": chain},
+                        http_status=status,
                     )
                 )
+                for metric_code, raw_value, unit in (
+                    ("defi_total_usd_value", defi_summary.get("total_usd_value"), "USD"),
+                    ("defi_total_unclaimed_usd_value", defi_summary.get("total_unclaimed_usd_value"), "USD"),
+                    ("defi_active_protocols", defi_summary.get("active_protocols"), "count"),
+                    ("defi_total_positions", defi_summary.get("total_positions"), "count"),
+                ):
+                    metric_value = decimal_or_none(raw_value)
+                    if metric_value is None:
+                        continue
+                    result.source_summaries.append(
+                        SummaryRecord(
+                            source_type="onchain",
+                            source="moralis",
+                            account_key=account_key,
+                            account_label=wallet.label,
+                            account_type="wallet_defi",
+                            metric_code=metric_code,
+                            metric_unit=unit,
+                            metric_value=metric_value,
+                            collected_at=collected_at,
+                            metadata={"chain": chain, "wallet_address": wallet.address},
+                        )
+                    )
 
-            try:
-                defi_positions, status = await self._get_evm(
-                    f"/wallets/{wallet.address}/defi/positions",
-                    params={"chain": chain},
-                )
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == 400:
-                    LOG.info("skip moralis defi positions for wallet=%s chain=%s due to http 400", wallet.address, chain)
+                try:
+                    defi_positions, status = await self._get_evm(
+                        f"/wallets/{wallet.address}/defi/positions",
+                        params={"chain": chain},
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 400:
+                        LOG.info("skip moralis defi positions for wallet=%s chain=%s due to http 400", wallet.address, chain)
+                        result.raw_ingestions.append(
+                            RawIngestionRecord(
+                                source_type="onchain",
+                                source="moralis",
+                                account_key=account_key,
+                                account_label=wallet.label,
+                                endpoint=f"/wallets/{wallet.address}/defi/positions",
+                                payload=_json_or_text(exc.response),
+                                request_params={"chain": chain},
+                                http_status=exc.response.status_code,
+                            )
+                        )
+                    else:
+                        raise
+                else:
                     result.raw_ingestions.append(
                         RawIngestionRecord(
                             source_type="onchain",
@@ -275,64 +295,49 @@ class MoralisCollector(Collector):
                             account_key=account_key,
                             account_label=wallet.label,
                             endpoint=f"/wallets/{wallet.address}/defi/positions",
-                            payload=_json_or_text(exc.response),
+                            payload=defi_positions,
                             request_params={"chain": chain},
-                            http_status=exc.response.status_code,
+                            http_status=status,
                         )
                     )
-                    return result
-                raise
 
-            result.raw_ingestions.append(
-                RawIngestionRecord(
-                    source_type="onchain",
-                    source="moralis",
-                    account_key=account_key,
-                    account_label=wallet.label,
-                    endpoint=f"/wallets/{wallet.address}/defi/positions",
-                    payload=defi_positions,
-                    request_params={"chain": chain},
-                    http_status=status,
-                )
-            )
-
-            for index, protocol in enumerate(_list_payload(defi_positions)):
-                position = protocol.get("position", {})
-                result.positions.append(
-                    PositionRecord(
-                        source_type="onchain",
-                        source="moralis",
-                        chain=chain,
-                        account_key=account_key,
-                        account_label=wallet.label,
-                        account_type="wallet_defi",
-                        wallet_address=wallet.address,
-                        position_kind="defi",
-                        asset_uid=f"defi:{chain}:{protocol.get('protocol_id')}:{index}",
-                        asset_symbol=protocol.get("protocol_name"),
-                        asset_name=position.get("label"),
-                        token_address=position.get("address"),
-                        amount=None,
-                        amount_raw=None,
-                        decimals=None,
-                        price_usd=None,
-                        price_source=None,
-                        price_as_of=None,
-                        usd_value=decimal_or_none(position.get("balance_usd")),
-                        is_verified=None,
-                        is_spam=None,
-                        metadata={
-                            "chain": chain,
-                            "protocol_id": protocol.get("protocol_id"),
-                            "protocol_url": protocol.get("protocol_url"),
-                            "protocol_logo": protocol.get("protocol_logo"),
-                            "total_unclaimed_usd_value": position.get("total_unclaimed_usd_value"),
-                            "tokens": position.get("tokens", []),
-                            "position_details": position.get("position_details", {}),
-                        },
-                        collected_at=collected_at,
-                    )
-                )
+                    for index, protocol in enumerate(_list_payload(defi_positions)):
+                        position = protocol.get("position", {})
+                        result.positions.append(
+                            PositionRecord(
+                                source_type="onchain",
+                                source="moralis",
+                                chain=chain,
+                                account_key=account_key,
+                                account_label=wallet.label,
+                                account_type="wallet_defi",
+                                wallet_address=wallet.address,
+                                position_kind="defi",
+                                asset_uid=f"defi:{chain}:{protocol.get('protocol_id')}:{index}",
+                                asset_symbol=protocol.get("protocol_name"),
+                                asset_name=position.get("label"),
+                                token_address=position.get("address"),
+                                amount=None,
+                                amount_raw=None,
+                                decimals=None,
+                                price_usd=None,
+                                price_source=None,
+                                price_as_of=None,
+                                usd_value=decimal_or_none(position.get("balance_usd")),
+                                is_verified=None,
+                                is_spam=None,
+                                metadata={
+                                    "chain": chain,
+                                    "protocol_id": protocol.get("protocol_id"),
+                                    "protocol_url": protocol.get("protocol_url"),
+                                    "protocol_logo": protocol.get("protocol_logo"),
+                                    "total_unclaimed_usd_value": position.get("total_unclaimed_usd_value"),
+                                    "tokens": position.get("tokens", []),
+                                    "position_details": position.get("position_details", {}),
+                                },
+                                collected_at=collected_at,
+                            )
+                        )
 
         return result
 
