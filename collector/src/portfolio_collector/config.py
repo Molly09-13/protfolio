@@ -67,6 +67,12 @@ class OkxConfig:
 
 
 @dataclass(slots=True)
+class DebankConfig:
+    access_key: str
+    base_url: str = "https://pro-openapi.debank.com"
+
+
+@dataclass(slots=True)
 class Settings:
     postgres_host: str
     postgres_port: int
@@ -81,6 +87,7 @@ class Settings:
     moralis_api_key: str | None = None
     evm_wallets: list[EvmWalletConfig] = field(default_factory=list)
     sol_wallets: list[SolWalletConfig] = field(default_factory=list)
+    debank: DebankConfig | None = None
     binance: BinanceConfig | None = None
     okx: OkxConfig | None = None
 
@@ -137,6 +144,13 @@ class Settings:
                 )
             )
 
+        debank = None
+        if os.getenv("DEBANK_ACCESS_KEY"):
+            debank = DebankConfig(
+                access_key=os.environ["DEBANK_ACCESS_KEY"],
+                base_url=os.getenv("DEBANK_BASE_URL", "https://pro-openapi.debank.com"),
+            )
+
         binance = None
         if os.getenv("BINANCE_API_KEY") and os.getenv("BINANCE_API_SECRET"):
             binance = BinanceConfig(
@@ -172,6 +186,7 @@ class Settings:
             moralis_api_key=os.getenv("MORALIS_API_KEY") or None,
             evm_wallets=evm_wallets,
             sol_wallets=sol_wallets,
+            debank=debank,
             binance=binance,
             okx=okx,
         )

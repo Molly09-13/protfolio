@@ -2,7 +2,8 @@
 
 这是一个适合部署在 VPS 上的资产汇总骨架，目标是把以下来源统一进 PostgreSQL，并直接给 Grafana 使用：
 
-- Moralis: EVM 地址、Solana 地址
+- DeBank: EVM 地址总资产、Token 明细、复杂 DeFi 仓位
+- Moralis: Solana 地址
 - Binance: 主账户、Funding、可选子账户
 - OKX: Trading、Funding、可选子账户
 
@@ -41,6 +42,12 @@ MORALIS_EVM_WALLETS=["0xYourMainEvmWallet"]
 ```
 
 系统会默认扫描 `eth/base/arbitrum/optimism/polygon/bsc`。
+
+EVM 资产当前优先通过 DeBank 拉取，你需要额外配置：
+
+```env
+DEBANK_ACCESS_KEY=your_access_key
+```
 
 2. 启动服务：
 
@@ -107,10 +114,10 @@ order by usd_value desc nulls last, amount desc nulls last;
 
 ## 当前取舍
 
+- EVM 地址通过 DeBank 获取总资产、Token 明细和复杂 DeFi 仓位，解决 Pendle 等复杂资产估值偏差问题。
+- Solana 资产继续通过 Moralis 获取，价格单独补。
 - Binance 现阶段优先抓 `Spot / Funding / 子账户 Spot / 子账户 Futures`，主账户 Futures 只先保留账户级 summary，不做更深的持仓拆解。
 - OKX 现阶段优先抓 `Trading / Funding / 子账户 Trading / 子账户 Funding`，并用官方 `asset-valuation` 做账户汇总。
-- Solana 资产估值单独补价，不假设 portfolio 接口一定返回稳定的 USD 字段。
-- EVM token 会在入库前过滤 `possible_spam = true` 的资产，并额外过滤 `未验证合约 + 无价格/零价格` 的同名伪币。
 
 ## 后续扩展
 

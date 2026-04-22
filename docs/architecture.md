@@ -20,6 +20,7 @@
 
 采集器按 source 拆分：
 
+- `DeBankCollector`
 - `MoralisCollector`
 - `BinanceCollector`
 - `OKXCollector`
@@ -76,10 +77,9 @@ Grafana 直接连 PostgreSQL，建议先做 4 个面板：
 EVM：
 
 - 一个 EVM 地址配置可自动展开成多条链采集，适合同地址体系下的 `ETH / Base / Arbitrum / Optimism / Polygon / BSC`
-- token balance 直接取 Moralis wallet token balances
-- DeFi 头寸单独取 Moralis DeFi summary / positions
-- EVM token 价格优先直接使用 Moralis 返回的 `usd_price`
-- 入库前过滤 `possible_spam = true` 的 token，并额外剔除 `未验证 + 无价格/零价格` 的伪造同名币
+- 总资产、Token 明细、复杂 DeFi 仓位优先取 DeBank
+- 这样对 Pendle、LP、收益凭证类资产的估值更稳
+- Moralis 不再作为 EVM 主估值来源
 
 Solana：
 
