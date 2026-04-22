@@ -28,6 +28,20 @@
 cp .env.example .env
 ```
 
+EVM 地址支持一条配置自动扫多条主流链，例如：
+
+```env
+MORALIS_EVM_WALLETS=[{"address":"0xYourMainEvmWallet","label":"main-evm","chains":["eth","base","arbitrum","optimism","polygon","bsc"],"include_defi":true}]
+```
+
+如果你只写地址字符串：
+
+```env
+MORALIS_EVM_WALLETS=["0xYourMainEvmWallet"]
+```
+
+系统会默认扫描 `eth/base/arbitrum/optimism/polygon/bsc`。
+
 2. 启动服务：
 
 ```bash
@@ -85,10 +99,10 @@ order by usd_value desc nulls last, amount desc nulls last;
 - Binance 现阶段优先抓 `Spot / Funding / 子账户 Spot / 子账户 Futures`，主账户 Futures 只先保留账户级 summary，不做更深的持仓拆解。
 - OKX 现阶段优先抓 `Trading / Funding / 子账户 Trading / 子账户 Funding`，并用官方 `asset-valuation` 做账户汇总。
 - Solana 资产估值单独补价，不假设 portfolio 接口一定返回稳定的 USD 字段。
+- EVM token 会在入库前过滤 `possible_spam = true` 的资产，并额外过滤 `未验证合约 + 无价格/零价格` 的同名伪币。
 
 ## 后续扩展
 
 - 增加资产映射表，把 `CEX asset code / EVM token address / Sol mint` 统一到内部资产主键
 - 增加告警任务，例如稳定币占比、单平台敞口、日变动阈值
 - 增加物化视图或 TimescaleDB 做时序加速
-

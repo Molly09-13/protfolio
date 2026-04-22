@@ -75,9 +75,11 @@ Grafana 直接连 PostgreSQL，建议先做 4 个面板：
 
 EVM：
 
+- 一个 EVM 地址配置可自动展开成多条链采集，适合同地址体系下的 `ETH / Base / Arbitrum / Optimism / Polygon / BSC`
 - token balance 直接取 Moralis wallet token balances
 - DeFi 头寸单独取 Moralis DeFi summary / positions
 - EVM token 价格优先直接使用 Moralis 返回的 `usd_price`
+- 入库前过滤 `possible_spam = true` 的 token，并额外剔除 `未验证 + 无价格/零价格` 的伪造同名币
 
 Solana：
 
@@ -126,4 +128,3 @@ OKX 资产拆三层：
 1. 加 `asset_registry` 映射表，解决多 source 资产统一问题。
 2. 加 `portfolio_views` 物化视图，减少 Grafana 查询复杂度。
 3. 加日报和异常波动告警，例如 Telegram 或飞书。
-

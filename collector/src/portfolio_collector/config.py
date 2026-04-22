@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
+DEFAULT_MORALIS_EVM_CHAINS = [
+    "eth",
+    "base",
+    "arbitrum",
+    "optimism",
+    "polygon",
+    "bsc",
+]
+
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
@@ -25,8 +34,8 @@ def _parse_json_list(name: str) -> list[object]:
 
 @dataclass(slots=True)
 class EvmWalletConfig:
-    chain: str
     address: str
+    chains: list[str] = field(default_factory=lambda: list(DEFAULT_MORALIS_EVM_CHAINS))
     label: str | None = None
     include_defi: bool = True
 
@@ -89,14 +98,25 @@ class Settings:
         evm_wallets: list[EvmWalletConfig] = []
         for item in _parse_json_list("MORALIS_EVM_WALLETS"):
             if isinstance(item, str):
-                evm_wallets.append(EvmWalletConfig(chain="eth", address=item))
+                evm_wallets.append(EvmWalletConfig(address=item))
                 continue
             if not isinstance(item, dict):
                 raise ValueError("MORALIS_EVM_WALLETS entries must be strings or objects")
+            chains_value = item.get("chains")
+            if chains_value is None and item.get("chain"):
+                chains = [str(item["chain"])]
+            elif chains_value is None:
+                chains = list(DEFAULT_MORALIS_EVM_CHAINS)
+            elif isinstance(chains_value, list):
+                chains = [str(value) for value in chains_value if str(value).strip()]
+            else:
+                raise ValueError("MORALIS_EVM_WALLETS chains must be a list when provided")
+            if not chains:
+                raise ValueError("MORALIS_EVM_WALLETS chains cannot be empty")
             evm_wallets.append(
                 EvmWalletConfig(
-                    chain=str(item["chain"]),
                     address=str(item["address"]),
+                    chains=chains,
                     label=str(item["label"]) if item.get("label") else None,
                     include_defi=bool(item.get("include_defi", True)),
                 )
@@ -155,4 +175,3 @@ class Settings:
             binance=binance,
             okx=okx,
         )
-

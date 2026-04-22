@@ -29,6 +29,37 @@ def _list_payload(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _should_filter_evm_token(token: dict[str, Any]) -> tuple[bool, str | None]:
+    if _is_truthy(token.get("possible_spam")):
+        return True, "possible_spam"
+
+    if _is_truthy(token.get("native_token")):
+        return False, None
+
+    price_usd = decimal_or_none(token.get("usd_price"))
+    verified = _is_truthy(token.get("verified_contract"))
+    has_symbol = bool(str(token.get("symbol") or "").strip())
+    balance = decimal_or_none(token.get("balance_formatted")) or compute_amount(
+        token.get("balance"),
+        token.get("decimals"),
+    )
+
+    if has_symbol and not verified and balance is not None and balance > 0 and (price_usd is None or price_usd <= 0):
+        return True, "unverified_zero_price"
+
+    return False, None
+
+
 class MoralisCollector(Collector):
     name = "moralis"
 
@@ -42,7 +73,8 @@ class MoralisCollector(Collector):
         tasks = []
 
         for wallet in self._settings.evm_wallets:
-            tasks.append(self._collect_evm_wallet(wallet))
+            for chain in wallet.chains:
+                tasks.append(self._collect_evm_wallet(wallet, chain))
         for wallet in self._settings.sol_wallets:
             tasks.append(self._collect_sol_wallet(wallet))
 
@@ -58,7 +90,7 @@ class MoralisCollector(Collector):
             result.extend(item)
         return result
 
-    async def _collect_evm_wallet(self, wallet: EvmWalletConfig) -> CollectionResult:
+    async def _collect_evm_wallet(self, wallet: EvmWalletConfig, chain: str) -> CollectionResult:
         result = CollectionResult()
         account_key = wallet.label or wallet.address
         collected_at = utc_now()
@@ -66,7 +98,7 @@ class MoralisCollector(Collector):
         cursor: str | None = None
         while True:
             params: dict[str, Any] = {
-                "chain": wallet.chain,
+                "chain": chain,
                 "exclude_spam": "true",
                 "limit": 100,
             }
@@ -91,6 +123,13 @@ class MoralisCollector(Collector):
             )
 
             for token in _list_payload(payload):
+                should_filter, filter_reason = _should_filter_evm_token(token)
+                if should_filter:
+                    result.warnings.append(
+                        f"filtered evm token {chain}:{token.get('symbol') or token.get('token_address')} reason={filter_reason}"
+                    )
+                    continue
+
                 amount = decimal_or_none(token.get("balance_formatted")) or compute_amount(
                     token.get("balance"),
                     token.get("decimals"),
@@ -100,16 +139,16 @@ class MoralisCollector(Collector):
                 usd_value = decimal_or_none(token.get("usd_value"))
                 token_address = None if token.get("native_token") else token.get("token_address")
                 asset_uid = (
-                    f"evm:{wallet.chain}:native"
+                    f"evm:{chain}:native"
                     if token.get("native_token")
-                    else f"evm:{wallet.chain}:{token_address}"
+                    else f"evm:{chain}:{token_address}"
                 )
 
                 result.positions.append(
                     PositionRecord(
                         source_type="onchain",
                         source="moralis",
-                        chain=wallet.chain,
+                        chain=chain,
                         account_key=account_key,
                         account_label=wallet.label,
                         account_type="wallet",
@@ -144,7 +183,7 @@ class MoralisCollector(Collector):
                         PriceRecord(
                             asset_uid=asset_uid,
                             symbol=token.get("symbol"),
-                            chain=wallet.chain,
+                            chain=chain,
                             token_address=token_address,
                             price_source="moralis:wallet_tokens",
                             price_usd=price_usd,
@@ -160,7 +199,7 @@ class MoralisCollector(Collector):
         if wallet.include_defi:
             defi_summary, status = await self._get_evm(
                 f"/wallets/{wallet.address}/defi/summary",
-                params={"chain": wallet.chain},
+                params={"chain": chain},
             )
             result.raw_ingestions.append(
                 RawIngestionRecord(
@@ -170,7 +209,7 @@ class MoralisCollector(Collector):
                     account_label=wallet.label,
                     endpoint=f"/wallets/{wallet.address}/defi/summary",
                     payload=defi_summary,
-                    request_params={"chain": wallet.chain},
+                    request_params={"chain": chain},
                     http_status=status,
                 )
             )
@@ -194,13 +233,13 @@ class MoralisCollector(Collector):
                         metric_unit=unit,
                         metric_value=metric_value,
                         collected_at=collected_at,
-                        metadata={"chain": wallet.chain, "wallet_address": wallet.address},
+                        metadata={"chain": chain, "wallet_address": wallet.address},
                     )
                 )
 
             defi_positions, status = await self._get_evm(
                 f"/wallets/{wallet.address}/defi/positions",
-                params={"chain": wallet.chain},
+                params={"chain": chain},
             )
             result.raw_ingestions.append(
                 RawIngestionRecord(
@@ -210,7 +249,7 @@ class MoralisCollector(Collector):
                     account_label=wallet.label,
                     endpoint=f"/wallets/{wallet.address}/defi/positions",
                     payload=defi_positions,
-                    request_params={"chain": wallet.chain},
+                    request_params={"chain": chain},
                     http_status=status,
                 )
             )
@@ -221,13 +260,13 @@ class MoralisCollector(Collector):
                     PositionRecord(
                         source_type="onchain",
                         source="moralis",
-                        chain=wallet.chain,
+                        chain=chain,
                         account_key=account_key,
                         account_label=wallet.label,
                         account_type="wallet_defi",
                         wallet_address=wallet.address,
                         position_kind="defi",
-                        asset_uid=f"defi:{wallet.chain}:{protocol.get('protocol_id')}:{index}",
+                        asset_uid=f"defi:{chain}:{protocol.get('protocol_id')}:{index}",
                         asset_symbol=protocol.get("protocol_name"),
                         asset_name=position.get("label"),
                         token_address=position.get("address"),
@@ -241,6 +280,7 @@ class MoralisCollector(Collector):
                         is_verified=None,
                         is_spam=None,
                         metadata={
+                            "chain": chain,
                             "protocol_id": protocol.get("protocol_id"),
                             "protocol_url": protocol.get("protocol_url"),
                             "protocol_logo": protocol.get("protocol_logo"),
