@@ -75,25 +75,8 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect coalesce(sum(usd_value), 0) as total_usd\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null;",
-          "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ],
-            "limit": 50
-          }
+          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect coalesce(sum(usd_value), 0) as total_usd\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring});",
+          "refId": "A"
         }
       ],
       "title": "Latest Total Asset",
@@ -153,7 +136,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select position_count\nfrom snapshot_runs\norder by id desc\nlimit 1;",
+          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect count(*) as position_count\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring});",
           "refId": "A"
         }
       ],
@@ -212,7 +195,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select status\nfrom snapshot_runs\norder by id desc\nlimit 1;",
+          "rawSql": "select status as value\nfrom snapshot_runs\norder by id desc\nlimit 1;",
           "refId": "A"
         }
       ],
@@ -312,7 +295,8 @@
       "options": {
         "displayLabels": [
           "name",
-          "percent"
+          "percent",
+          "value"
         ],
         "legend": {
           "displayMode": "list",
@@ -338,7 +322,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label as metric, sum(usd_value) as value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\ngroup by account_label\norder by value desc;",
+          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label as metric, sum(usd_value) as value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\n  and usd_value >= 1\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring})\ngroup by account_label\nhaving sum(usd_value) >= 1\norder by value desc;",
           "refId": "A"
         }
       ],
@@ -416,7 +400,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "select started_at as time, sum(coalesce(usd_value, 0)) as total_usd\nfrom snapshot_runs sr\njoin positions p on p.snapshot_run_id = sr.id\nwhere sr.status in ('success', 'partial_success')\ngroup by sr.id, sr.started_at\norder by sr.started_at;",
+          "rawSql": "select sr.started_at as time, sum(coalesce(p.usd_value, 0)) as total_usd\nfrom snapshot_runs sr\njoin positions p on p.snapshot_run_id = sr.id\nwhere sr.status in ('success', 'partial_success')\n  and (${account_label:sqlstring} = '__all' or p.account_label = ${account_label:sqlstring})\ngroup by sr.id, sr.started_at\norder by sr.started_at;",
           "refId": "A"
         }
       ],
@@ -460,6 +444,18 @@
                 "value": "currencyUSD"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "price_usd"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
           }
         ]
       },
@@ -488,7 +484,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label, chain, asset_symbol, amount, price_usd, usd_value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\norder by usd_value desc nulls last, amount desc nulls last\nlimit 100;",
+          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label, chain, asset_symbol, amount, price_usd, usd_value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\n  and usd_value >= 1\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring})\norder by usd_value desc nulls last, amount desc nulls last\nlimit 200;",
           "refId": "A"
         }
       ],
@@ -504,7 +500,35 @@
     "moralis"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "portfolio-postgres"
+        },
+        "definition": "select '__all' as __value, 'All' as __text union all select distinct account_label as __value, account_label as __text from positions where account_label is not null order by __text;",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Address",
+        "multi": false,
+        "name": "account_label",
+        "options": [],
+        "query": {
+          "query": "select '__all' as __value, 'All' as __text union all select distinct account_label as __value, account_label as __text from positions where account_label is not null order by __text;",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-30d",
@@ -514,6 +538,6 @@
   "timezone": "",
   "title": "Portfolio Overview",
   "uid": "portfolio-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
