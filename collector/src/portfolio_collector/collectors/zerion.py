@@ -44,6 +44,12 @@ def _first_non_empty(*values: Any) -> str | None:
     return None
 
 
+def _name_from_meta(meta: Any) -> str | None:
+    if isinstance(meta, dict):
+        return _first_non_empty(meta.get("name"), meta.get("symbol"), meta.get("id"))
+    return _first_non_empty(meta)
+
+
 class ZerionCollector(Collector):
     name = "zerion"
 
@@ -221,8 +227,8 @@ class ZerionCollector(Collector):
             chain_item = included.get(f"{chain_ref.get('type')}:{chain_ref.get('id')}", {})
             fungible_attrs = fungible.get("attributes") or {}
             chain_attrs = chain_item.get("attributes") or {}
-            protocol_meta = attributes.get("protocol") or {}
-            app_meta = attributes.get("app") or {}
+            protocol_meta = attributes.get("protocol")
+            app_meta = attributes.get("app")
 
             quantity = attributes.get("quantity") or {}
             amount = decimal_or_none(quantity.get("float") or quantity.get("numeric") or quantity.get("value"))
@@ -234,16 +240,16 @@ class ZerionCollector(Collector):
                 fungible_attrs.get("symbol"),
                 attributes.get("symbol"),
                 attributes.get("display_symbol"),
-                protocol_meta.get("name"),
-                app_meta.get("name"),
+                _name_from_meta(protocol_meta),
+                _name_from_meta(app_meta),
             )
             name = _first_non_empty(
                 attributes.get("name"),
                 attributes.get("display_name"),
                 fungible_attrs.get("name"),
                 fungible_attrs.get("symbol"),
-                protocol_meta.get("name"),
-                app_meta.get("name"),
+                _name_from_meta(protocol_meta),
+                _name_from_meta(app_meta),
                 symbol,
                 item.get("id"),
             )
