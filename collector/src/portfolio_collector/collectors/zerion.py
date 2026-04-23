@@ -41,7 +41,10 @@ class ZerionCollector(Collector):
         self._config = config
         self._wallets = wallets
         self._client = client
-        self._limit = asyncio.Semaphore(4)
+        self._limit = asyncio.Semaphore(1)
+        self._request_lock = asyncio.Lock()
+        self._min_interval_seconds = 1.0
+        self._max_retries = 4
 
     async def collect(self) -> CollectionResult:
         result = CollectionResult()
@@ -255,16 +258,39 @@ class ZerionCollector(Collector):
 
     async def _get(self, path_or_url: str, params: dict[str, str] | None = None) -> tuple[dict[str, Any], int]:
         url = path_or_url if path_or_url.startswith("http") else f"{self._config.base_url}{path_or_url}"
-        response = await self._client.get(
-            url,
-            params=params,
-            headers={
-                "Authorization": f"Basic {self._basic_token()}",
-                "accept": "application/json",
-            },
-        )
-        response.raise_for_status()
-        return response.json(), response.status_code
+        last_exc: Exception | None = None
+
+        for attempt in range(self._max_retries + 1):
+            async with self._request_lock:
+                response = await self._client.get(
+                    url,
+                    params=params,
+                    headers={
+                        "Authorization": f"Basic {self._basic_token()}",
+                        "accept": "application/json",
+                    },
+                )
+                await asyncio.sleep(self._min_interval_seconds)
+
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response.json(), response.status_code
+
+            retry_after = response.headers.get("Retry-After")
+            wait_seconds = self._retry_wait_seconds(retry_after, attempt)
+            LOG.warning("zerion rate limited for url=%s, retry in %.1fs (attempt %s/%s)", url, wait_seconds, attempt + 1, self._max_retries + 1)
+            last_exc = httpx.HTTPStatusError(
+                f"Client error '429 Too Many Requests' for url '{url}'",
+                request=response.request,
+                response=response,
+            )
+            if attempt >= self._max_retries:
+                break
+            await asyncio.sleep(wait_seconds)
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("zerion request failed without exception")
 
     def _basic_token(self) -> str:
         return base64.b64encode(f"{self._config.api_key}:".encode()).decode()
@@ -277,3 +303,11 @@ class ZerionCollector(Collector):
         if next_link.startswith("/"):
             return next_link
         return None
+
+    def _retry_wait_seconds(self, retry_after: str | None, attempt: int) -> float:
+        if retry_after:
+            try:
+                return max(float(retry_after), self._min_interval_seconds)
+            except ValueError:
+                pass
+        return max(self._min_interval_seconds, 2 ** attempt)
