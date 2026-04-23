@@ -484,7 +484,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label, chain, asset_symbol, amount, price_usd, usd_value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\n  and usd_value >= 1\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring})\norder by usd_value desc nulls last, amount desc nulls last\nlimit 200;",
+          "rawSql": "with latest as (\n  select max(id) as id\n  from snapshot_runs\n  where status in ('success', 'partial_success')\n)\nselect account_label, chain, account_type, position_kind, asset_name, asset_symbol, amount, price_usd, usd_value\nfrom positions\nwhere snapshot_run_id = (select id from latest)\n  and usd_value is not null\n  and usd_value >= 1\n  and (${account_label:sqlstring} = '__all' or account_label = ${account_label:sqlstring})\norder by usd_value desc nulls last, amount desc nulls last\nlimit 200;",
           "refId": "A"
         }
       ],

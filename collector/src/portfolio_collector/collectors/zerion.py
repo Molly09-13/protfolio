@@ -34,6 +34,16 @@ def _flatten_included(included: list[dict[str, Any]] | None) -> dict[str, dict[s
     return flattened
 
 
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
 class ZerionCollector(Collector):
     name = "zerion"
 
@@ -211,6 +221,8 @@ class ZerionCollector(Collector):
             chain_item = included.get(f"{chain_ref.get('type')}:{chain_ref.get('id')}", {})
             fungible_attrs = fungible.get("attributes") or {}
             chain_attrs = chain_item.get("attributes") or {}
+            protocol_meta = attributes.get("protocol") or {}
+            app_meta = attributes.get("app") or {}
 
             quantity = attributes.get("quantity") or {}
             amount = decimal_or_none(quantity.get("float") or quantity.get("numeric") or quantity.get("value"))
@@ -218,8 +230,23 @@ class ZerionCollector(Collector):
             usd_value = decimal_or_none(_zerion_value(attributes, "value", "usd_value"))
             position_type = str(attributes.get("position_type") or attributes.get("type") or "wallet")
             chain = chain_attrs.get("id") or chain_item.get("id") or chain_ref.get("id")
-            symbol = fungible_attrs.get("symbol") or attributes.get("symbol")
-            name = fungible_attrs.get("name") or attributes.get("name") or symbol
+            symbol = _first_non_empty(
+                fungible_attrs.get("symbol"),
+                attributes.get("symbol"),
+                attributes.get("display_symbol"),
+                protocol_meta.get("name"),
+                app_meta.get("name"),
+            )
+            name = _first_non_empty(
+                attributes.get("name"),
+                attributes.get("display_name"),
+                fungible_attrs.get("name"),
+                fungible_attrs.get("symbol"),
+                protocol_meta.get("name"),
+                app_meta.get("name"),
+                symbol,
+                item.get("id"),
+            )
 
             rows.append(
                 PositionRecord(
