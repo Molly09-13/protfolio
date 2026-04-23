@@ -106,6 +106,29 @@ class OkxCollector(Collector):
         )
         result.source_summaries.extend(self._summaries_from_valuation(valuation, collected_at))
 
+        positions, status, params = await self._signed_request("GET", "/api/v5/account/positions")
+        result.raw_ingestions.append(
+            RawIngestionRecord(
+                source_type="cex",
+                source="okx",
+                account_key="main",
+                account_label="OKX Main",
+                endpoint="/api/v5/account/positions",
+                payload=positions,
+                request_params=params,
+                http_status=status,
+            )
+        )
+        result.positions.extend(
+            self._positions_from_positions_endpoint(
+                positions,
+                account_key="main",
+                account_label="OKX Main",
+                account_type="positions",
+                collected_at=collected_at,
+            )
+        )
+
         if self._config.include_subaccounts:
             subaccounts, status, params = await self._signed_request("GET", "/api/v5/users/subaccount/list")
             result.raw_ingestions.append(
@@ -356,6 +379,61 @@ class OkxCollector(Collector):
                         metadata={},
                     )
                 )
+        return rows
+
+    def _positions_from_positions_endpoint(
+        self,
+        payload: dict[str, Any],
+        *,
+        account_key: str,
+        account_label: str,
+        account_type: str,
+        collected_at,
+    ) -> list[PositionRecord]:
+        rows: list[PositionRecord] = []
+        for item in _list_payload(payload):
+            inst_id = item.get("instId")
+            pos = decimal_or_none(item.get("pos"))
+            if not inst_id or pos is None or pos == 0:
+                continue
+            upl = decimal_or_none(item.get("upl"))
+            rows.append(
+                PositionRecord(
+                    source_type="cex",
+                    source="okx",
+                    chain=None,
+                    account_key=account_key,
+                    account_label=account_label,
+                    account_type=account_type,
+                    subaccount=None,
+                    wallet_address=None,
+                    position_kind="cex_position",
+                    asset_uid=f"cex:okx:{account_type}:{inst_id}:{item.get('posSide') or 'net'}",
+                    asset_symbol=inst_id,
+                    asset_name=inst_id,
+                    token_address=None,
+                    amount_raw=None,
+                    decimals=None,
+                    amount=pos,
+                    price_usd=None,
+                    price_source=None,
+                    price_as_of=None,
+                    usd_value=upl,
+                    is_verified=True,
+                    is_spam=False,
+                    metadata={
+                        "inst_type": item.get("instType"),
+                        "ccy": item.get("ccy"),
+                        "pos_side": item.get("posSide"),
+                        "avg_px": item.get("avgPx"),
+                        "mark_px": item.get("markPx"),
+                        "liq_px": item.get("liqPx"),
+                        "margin_mode": item.get("mgnMode"),
+                        "upl_ratio": item.get("uplRatio"),
+                    },
+                    collected_at=collected_at,
+                )
+            )
         return rows
 
     async def _signed_request(

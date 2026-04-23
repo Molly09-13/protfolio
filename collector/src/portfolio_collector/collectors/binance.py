@@ -145,6 +145,78 @@ class BinanceCollector(Collector):
             )
         )
 
+        cross_margin, status, params = await self._signed_request("GET", "/sapi/v1/margin/account")
+        result.raw_ingestions.append(
+            RawIngestionRecord(
+                source_type="cex",
+                source="binance",
+                account_key="main",
+                account_label="Binance Main",
+                endpoint="/sapi/v1/margin/account",
+                payload=cross_margin,
+                request_params=params,
+                http_status=status,
+            )
+        )
+        result.extend(self._positions_from_cross_margin(cross_margin, collected_at=collected_at))
+
+        isolated_margin, status, params = await self._signed_request("GET", "/sapi/v1/margin/isolated/account")
+        result.raw_ingestions.append(
+            RawIngestionRecord(
+                source_type="cex",
+                source="binance",
+                account_key="main",
+                account_label="Binance Main",
+                endpoint="/sapi/v1/margin/isolated/account",
+                payload=isolated_margin,
+                request_params=params,
+                http_status=status,
+            )
+        )
+        result.extend(self._positions_from_isolated_margin(isolated_margin, collected_at=collected_at))
+
+        usdt_futures, status, params = await self._signed_futures_request("GET", "https://fapi.binance.com", "/fapi/v3/account")
+        result.raw_ingestions.append(
+            RawIngestionRecord(
+                source_type="cex",
+                source="binance",
+                account_key="main",
+                account_label="Binance Main",
+                endpoint="/fapi/v3/account",
+                payload=usdt_futures,
+                request_params=params,
+                http_status=status,
+            )
+        )
+        result.extend(
+            self._positions_from_main_futures_account(
+                usdt_futures,
+                account_type="usdt_futures",
+                collected_at=collected_at,
+            )
+        )
+
+        coin_futures, status, params = await self._signed_futures_request("GET", "https://dapi.binance.com", "/dapi/v1/account")
+        result.raw_ingestions.append(
+            RawIngestionRecord(
+                source_type="cex",
+                source="binance",
+                account_key="main",
+                account_label="Binance Main",
+                endpoint="/dapi/v1/account",
+                payload=coin_futures,
+                request_params=params,
+                http_status=status,
+            )
+        )
+        result.extend(
+            self._positions_from_main_futures_account(
+                coin_futures,
+                account_type="coin_futures",
+                collected_at=collected_at,
+            )
+        )
+
         if self._config.include_subaccounts:
             subaccounts, status, params = await self._signed_request("GET", "/sapi/v1/sub-account/list")
             result.raw_ingestions.append(
@@ -168,6 +240,189 @@ class BinanceCollector(Collector):
                     continue
                 result.extend(item)
 
+        return result
+
+    def _positions_from_cross_margin(self, payload: dict[str, Any], *, collected_at) -> CollectionResult:
+        result = CollectionResult()
+        total_asset_of_btc = decimal_or_none(payload.get("totalAssetOfBtc"))
+        if total_asset_of_btc is not None:
+            result.source_summaries.append(
+                SummaryRecord(
+                    source_type="cex",
+                    source="binance",
+                    account_key="main",
+                    account_label="Binance Main",
+                    account_type="cross_margin",
+                    metric_code="total_asset_btc",
+                    metric_unit="BTC",
+                    metric_value=total_asset_of_btc,
+                    collected_at=collected_at,
+                    metadata={},
+                )
+            )
+
+        for item in payload.get("userAssets", []):
+            asset = item.get("asset")
+            if not asset:
+                continue
+            free = decimal_or_zero(item.get("free"))
+            borrowed = decimal_or_zero(item.get("borrowed"))
+            interest = decimal_or_zero(item.get("interest"))
+            locked = decimal_or_zero(item.get("locked"))
+            net_asset = decimal_or_none(item.get("netAsset"))
+            amount = net_asset if net_asset is not None else (free + locked - borrowed - interest)
+            if amount == 0:
+                continue
+            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            result.positions.append(
+                PositionRecord(
+                    source_type="cex",
+                    source="binance",
+                    chain=None,
+                    account_key="main",
+                    account_label="Binance Main",
+                    account_type="cross_margin",
+                    subaccount=None,
+                    wallet_address=None,
+                    position_kind="cex_asset",
+                    asset_uid=f"cex:binance:cross_margin:{asset}",
+                    asset_symbol=asset,
+                    asset_name=asset,
+                    token_address=None,
+                    amount_raw=None,
+                    decimals=None,
+                    amount=amount,
+                    price_usd=price_usd,
+                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_as_of=collected_at if price_usd is not None else None,
+                    usd_value=(amount * price_usd) if price_usd is not None else None,
+                    is_verified=True,
+                    is_spam=False,
+                    metadata={
+                        "free": str(free),
+                        "borrowed": str(borrowed),
+                        "interest": str(interest),
+                        "locked": str(locked),
+                        "net_asset": item.get("netAsset"),
+                    },
+                    collected_at=collected_at,
+                )
+            )
+        return result
+
+    def _positions_from_isolated_margin(self, payload: dict[str, Any], *, collected_at) -> CollectionResult:
+        result = CollectionResult()
+        for asset_group in payload.get("assets", []):
+            symbol = asset_group.get("symbol")
+            for side_name in ("baseAsset", "quoteAsset"):
+                side = asset_group.get(side_name) or {}
+                asset = side.get("asset")
+                if not asset:
+                    continue
+                net_asset = decimal_or_none(side.get("netAsset"))
+                if net_asset is None or net_asset == 0:
+                    continue
+                price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+                result.positions.append(
+                    PositionRecord(
+                        source_type="cex",
+                        source="binance",
+                        chain=None,
+                        account_key="main",
+                        account_label="Binance Main",
+                        account_type="isolated_margin",
+                        subaccount=symbol,
+                        wallet_address=None,
+                        position_kind="cex_asset",
+                        asset_uid=f"cex:binance:isolated_margin:{symbol}:{asset}",
+                        asset_symbol=asset,
+                        asset_name=asset,
+                        token_address=None,
+                        amount_raw=None,
+                        decimals=None,
+                        amount=net_asset,
+                        price_usd=price_usd,
+                        price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                        price_as_of=collected_at if price_usd is not None else None,
+                        usd_value=(net_asset * price_usd) if price_usd is not None else None,
+                        is_verified=True,
+                        is_spam=False,
+                        metadata={
+                            "symbol": symbol,
+                            "borrowed": side.get("borrowed"),
+                            "interest": side.get("interest"),
+                            "free": side.get("free"),
+                            "locked": side.get("locked"),
+                        },
+                        collected_at=collected_at,
+                    )
+                )
+        return result
+
+    def _positions_from_main_futures_account(
+        self,
+        payload: dict[str, Any],
+        *,
+        account_type: str,
+        collected_at,
+    ) -> CollectionResult:
+        result = CollectionResult()
+        total_wallet_balance = decimal_or_none(payload.get("totalWalletBalance"))
+        if total_wallet_balance is not None:
+            result.source_summaries.append(
+                SummaryRecord(
+                    source_type="cex",
+                    source="binance",
+                    account_key="main",
+                    account_label="Binance Main",
+                    account_type=account_type,
+                    metric_code="total_wallet_balance",
+                    metric_unit="USD" if account_type == "usdt_futures" else "mixed",
+                    metric_value=total_wallet_balance,
+                    collected_at=collected_at,
+                    metadata={},
+                )
+            )
+
+        for item in payload.get("assets", []):
+            asset = item.get("asset")
+            wallet_balance = decimal_or_none(item.get("walletBalance"))
+            if not asset or wallet_balance is None or wallet_balance == 0:
+                continue
+            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            result.positions.append(
+                PositionRecord(
+                    source_type="cex",
+                    source="binance",
+                    chain=None,
+                    account_key="main",
+                    account_label="Binance Main",
+                    account_type=account_type,
+                    subaccount=None,
+                    wallet_address=None,
+                    position_kind="cex_asset",
+                    asset_uid=f"cex:binance:{account_type}:{asset}",
+                    asset_symbol=asset,
+                    asset_name=asset,
+                    token_address=None,
+                    amount_raw=None,
+                    decimals=None,
+                    amount=wallet_balance,
+                    price_usd=price_usd,
+                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_as_of=collected_at if price_usd is not None else None,
+                    usd_value=(wallet_balance * price_usd) if price_usd is not None else None,
+                    is_verified=True,
+                    is_spam=False,
+                    metadata={
+                        "initial_margin": item.get("initialMargin"),
+                        "unrealized_profit": item.get("unrealizedProfit"),
+                        "margin_balance": item.get("marginBalance"),
+                        "max_withdraw_amount": item.get("maxWithdrawAmount"),
+                    },
+                    collected_at=collected_at,
+                )
+            )
         return result
 
     async def _collect_subaccount(self, email: str) -> CollectionResult:
@@ -389,6 +644,32 @@ class BinanceCollector(Collector):
             hashlib.sha256,
         ).hexdigest()
         url = f"{self._config.base_url}{path}?{query}&signature={signature}"
+        response = await self._client.request(
+            method,
+            url,
+            headers={"X-MBX-APIKEY": self._config.api_key},
+        )
+        response.raise_for_status()
+        return response.json(), response.status_code, prepared
+
+    async def _signed_futures_request(
+        self,
+        method: str,
+        base_url: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[Any, int, dict[str, Any]]:
+        prepared: dict[str, Any] = {}
+        if params:
+            prepared.update(params)
+        prepared["timestamp"] = str(int(utc_now().timestamp() * 1000))
+        query = urlencode(prepared, doseq=True, safe="@")
+        signature = hmac.new(
+            self._config.api_secret.encode(),
+            query.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        url = f"{base_url}{path}?{query}&signature={signature}"
         response = await self._client.request(
             method,
             url,

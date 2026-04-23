@@ -116,8 +116,8 @@ order by usd_value desc nulls last, amount desc nulls last;
 
 - EVM 地址通过 DeBank 获取总资产、Token 明细和复杂 DeFi 仓位，解决 Pendle 等复杂资产估值偏差问题。
 - Solana 资产继续通过 Moralis 获取，价格单独补。
-- Binance 现阶段优先抓 `Spot / Funding / 子账户 Spot / 子账户 Futures`，主账户 Futures 只先保留账户级 summary，不做更深的持仓拆解。
-- OKX 现阶段优先抓 `Trading / Funding / 子账户 Trading / 子账户 Funding`，并用官方 `asset-valuation` 做账户汇总。
+- Binance 现阶段已覆盖 `Spot / Funding / Cross Margin / Isolated Margin / 主账户 Futures / 子账户 Spot / 子账户 Futures`。
+- OKX 现阶段已覆盖 `Trading / Funding / Positions / Asset Valuation / 子账户 Trading / 子账户 Funding`。
 
 ## 后续扩展
 
