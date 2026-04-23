@@ -3,6 +3,7 @@
 这是一个适合部署在 VPS 上的资产汇总骨架，目标是把以下来源统一进 PostgreSQL，并直接给 Grafana 使用：
 
 - DeBank: EVM 地址总资产、Token 明细、复杂 DeFi 仓位
+- Zerion: EVM + Solana 地址总资产、Token 明细、DeFi 仓位
 - Moralis: Solana 地址
 - Binance: 主账户、Funding、可选子账户
 - OKX: Trading、Funding、可选子账户
@@ -48,6 +49,15 @@ EVM 资产当前优先通过 DeBank 拉取，你需要额外配置：
 ```env
 DEBANK_ACCESS_KEY=your_access_key
 ```
+
+如果使用 Zerion 作为链上主数据源，配置：
+
+```env
+ZERION_API_KEY=your_api_key
+ZERION_WALLETS=[{"address":"0xYourMainEvmWallet","label":"main-evm"},{"address":"YourSolAddress","label":"main-sol"}]
+```
+
+Zerion 使用 HTTP Basic Auth，API key 作为用户名、密码为空。配置 `ZERION_API_KEY` 后，链上地址会优先走 Zerion；CEX 采集不受影响。
 
 2. 启动服务：
 
@@ -115,7 +125,7 @@ order by usd_value desc nulls last, amount desc nulls last;
 ## 当前取舍
 
 - EVM 地址通过 DeBank 获取总资产、Token 明细和复杂 DeFi 仓位，解决 Pendle 等复杂资产估值偏差问题。
-- Solana 资产继续通过 Moralis 获取，价格单独补。
+- 如果配置 `ZERION_API_KEY`，链上资产优先通过 Zerion 获取，覆盖 EVM 和 Solana。未配置 Zerion 时，EVM 可走 DeBank，Solana 可走 Moralis。
 - Binance 现阶段已覆盖 `Spot / Funding / Cross Margin / Isolated Margin / 主账户 Futures / 子账户 Spot / 子账户 Futures`。
 - OKX 现阶段已覆盖 `Trading / Funding / Positions / Asset Valuation / 子账户 Trading / 子账户 Funding`。
 - CEX 明细会用交易所公开行情补 `price_usd/usd_value`，Grafana 默认隐藏 `usd_value < 1` 的小额资产。

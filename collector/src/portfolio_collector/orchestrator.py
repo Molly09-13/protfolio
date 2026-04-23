@@ -6,7 +6,7 @@ import logging
 import httpx
 
 from . import db
-from .collectors import BinanceCollector, DebankCollector, MoralisCollector, OkxCollector
+from .collectors import BinanceCollector, DebankCollector, MoralisCollector, OkxCollector, ZerionCollector
 from .config import Settings
 from .models import CollectionResult
 
@@ -21,9 +21,11 @@ class Orchestrator:
     async def run_once(self) -> int:
         async with httpx.AsyncClient(timeout=self._settings.request_timeout_seconds) as client:
             collectors = []
-            if self._settings.debank and self._settings.evm_wallets:
+            if self._settings.zerion and self._settings.zerion_wallets:
+                collectors.append(ZerionCollector(self._settings.zerion, self._settings.zerion_wallets, client))
+            elif self._settings.debank and self._settings.evm_wallets:
                 collectors.append(DebankCollector(self._settings.debank, self._settings.evm_wallets, client))
-            if self._settings.moralis_api_key and self._settings.sol_wallets:
+            if not self._settings.zerion and self._settings.moralis_api_key and self._settings.sol_wallets:
                 collectors.append(MoralisCollector(self._settings, client, collect_evm=False, collect_sol=True))
             if self._settings.binance:
                 collectors.append(BinanceCollector(self._settings.binance, client))

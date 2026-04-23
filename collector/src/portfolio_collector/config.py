@@ -48,6 +48,12 @@ class SolWalletConfig:
 
 
 @dataclass(slots=True)
+class ZerionWalletConfig:
+    address: str
+    label: str | None = None
+
+
+@dataclass(slots=True)
 class BinanceConfig:
     api_key: str
     api_secret: str
@@ -73,6 +79,13 @@ class DebankConfig:
 
 
 @dataclass(slots=True)
+class ZerionConfig:
+    api_key: str
+    base_url: str = "https://api.zerion.io"
+    sync: bool = False
+
+
+@dataclass(slots=True)
 class Settings:
     postgres_host: str
     postgres_port: int
@@ -88,6 +101,8 @@ class Settings:
     evm_wallets: list[EvmWalletConfig] = field(default_factory=list)
     sol_wallets: list[SolWalletConfig] = field(default_factory=list)
     debank: DebankConfig | None = None
+    zerion: ZerionConfig | None = None
+    zerion_wallets: list[ZerionWalletConfig] = field(default_factory=list)
     binance: BinanceConfig | None = None
     okx: OkxConfig | None = None
 
@@ -144,11 +159,39 @@ class Settings:
                 )
             )
 
+        zerion_wallets: list[ZerionWalletConfig] = []
+        for item in _parse_json_list("ZERION_WALLETS"):
+            if isinstance(item, str):
+                zerion_wallets.append(ZerionWalletConfig(address=item))
+                continue
+            if not isinstance(item, dict):
+                raise ValueError("ZERION_WALLETS entries must be strings or objects")
+            zerion_wallets.append(
+                ZerionWalletConfig(
+                    address=str(item["address"]),
+                    label=str(item["label"]) if item.get("label") else None,
+                )
+            )
+
+        if not zerion_wallets:
+            for wallet in evm_wallets:
+                zerion_wallets.append(ZerionWalletConfig(address=wallet.address, label=wallet.label))
+            for wallet in sol_wallets:
+                zerion_wallets.append(ZerionWalletConfig(address=wallet.address, label=wallet.label))
+
         debank = None
         if os.getenv("DEBANK_ACCESS_KEY"):
             debank = DebankConfig(
                 access_key=os.environ["DEBANK_ACCESS_KEY"],
                 base_url=os.getenv("DEBANK_BASE_URL", "https://pro-openapi.debank.com"),
+            )
+
+        zerion = None
+        if os.getenv("ZERION_API_KEY"):
+            zerion = ZerionConfig(
+                api_key=os.environ["ZERION_API_KEY"],
+                base_url=os.getenv("ZERION_BASE_URL", "https://api.zerion.io"),
+                sync=_parse_bool(os.getenv("ZERION_SYNC"), False),
             )
 
         binance = None
@@ -187,6 +230,8 @@ class Settings:
             evm_wallets=evm_wallets,
             sol_wallets=sol_wallets,
             debank=debank,
+            zerion=zerion,
+            zerion_wallets=zerion_wallets,
             binance=binance,
             okx=okx,
         )
