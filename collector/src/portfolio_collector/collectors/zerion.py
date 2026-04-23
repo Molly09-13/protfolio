@@ -87,7 +87,7 @@ class ZerionCollector(Collector):
 
             positions_params = {
                 "currency": "usd",
-                "filter[positions]": "no_filter",
+                "filter[positions]": "only_simple" if self._is_solana_address(wallet.address) else "no_filter",
                 "filter[trash]": "only_non_trash",
                 "sort": "-value",
                 "page[size]": "100",
@@ -294,6 +294,9 @@ class ZerionCollector(Collector):
 
     def _basic_token(self) -> str:
         return base64.b64encode(f"{self._config.api_key}:".encode()).decode()
+
+    def _is_solana_address(self, address: str) -> bool:
+        return not address.lower().startswith("0x")
 
     def _path_from_next_link(self, next_link: str | None) -> str | None:
         if not next_link:

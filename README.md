@@ -58,6 +58,7 @@ ZERION_WALLETS=[{"address":"0xYourMainEvmWallet","label":"main-evm"},{"address":
 ```
 
 Zerion 使用 HTTP Basic Auth，API key 作为用户名、密码为空。配置 `ZERION_API_KEY` 后，链上地址会优先走 Zerion；CEX 采集不受影响。
+对于 Solana 地址，Zerion 当前只拉 `simple positions`，不强求 protocol positions，避免接口返回 `400`。
 
 2. 启动服务：
 
