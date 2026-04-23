@@ -12,6 +12,7 @@ import httpx
 
 from ..config import OkxConfig
 from ..models import CollectionResult, PositionRecord, RawIngestionRecord, SummaryRecord
+from ..price_utils import build_price_from_tickers, stablecoin_price
 from ..utils import decimal_or_none, okx_timestamp, utc_now
 from .base import Collector
 
@@ -29,6 +30,16 @@ def _list_payload(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _okx_price_source(asset: str, price: Any, *, derived_from_equity: bool = False) -> str | None:
+    if price is None:
+        return None
+    if derived_from_equity:
+        return "okx:eqUsd/eq"
+    if stablecoin_price(asset) is not None:
+        return "hardcoded:stablecoin"
+    return "okx:market_tickers"
+
+
 class OkxCollector(Collector):
     name = "okx"
 
@@ -36,10 +47,12 @@ class OkxCollector(Collector):
         self._config = config
         self._client = client
         self._subaccount_limit = asyncio.Semaphore(4)
+        self._price_map: dict[str, Any] = {}
 
     async def collect(self) -> CollectionResult:
         result = CollectionResult()
         collected_at = utc_now()
+        self._price_map = await self._fetch_price_map()
 
         trading, status, params = await self._signed_request("GET", "/api/v5/account/balance")
         result.raw_ingestions.append(
@@ -256,7 +269,10 @@ class OkxCollector(Collector):
             if not ccy or eq is None or eq == 0:
                 continue
             eq_usd = decimal_or_none(item.get("eqUsd"))
-            price_usd = (eq_usd / eq) if eq_usd is not None and eq != 0 else None
+            derived_from_equity = eq_usd is not None and eq != 0
+            price_usd = (eq_usd / eq) if derived_from_equity else self._price_for_asset(ccy)
+            if eq_usd is None and price_usd is not None:
+                eq_usd = eq * price_usd
             result.positions.append(
                 PositionRecord(
                     source_type="cex",
@@ -276,7 +292,7 @@ class OkxCollector(Collector):
                     decimals=None,
                     amount=eq,
                     price_usd=price_usd,
-                    price_source="okx:eqUsd/eq" if price_usd is not None else None,
+                    price_source=_okx_price_source(ccy, price_usd, derived_from_equity=derived_from_equity),
                     price_as_of=collected_at if price_usd is not None else None,
                     usd_value=eq_usd,
                     is_verified=True,
@@ -309,6 +325,7 @@ class OkxCollector(Collector):
             bal = decimal_or_none(item.get("bal"))
             if not ccy or bal is None or bal == 0:
                 continue
+            price_usd = self._price_for_asset(ccy)
             rows.append(
                 PositionRecord(
                     source_type="cex",
@@ -327,10 +344,10 @@ class OkxCollector(Collector):
                     amount_raw=None,
                     decimals=None,
                     amount=bal,
-                    price_usd=None,
-                    price_source=None,
-                    price_as_of=None,
-                    usd_value=None,
+                    price_usd=price_usd,
+                    price_source=_okx_price_source(ccy, price_usd),
+                    price_as_of=collected_at if price_usd is not None else None,
+                    usd_value=(bal * price_usd) if price_usd is not None else None,
                     is_verified=True,
                     is_spam=False,
                     metadata={
@@ -466,3 +483,22 @@ class OkxCollector(Collector):
         )
         response.raise_for_status()
         return response.json(), response.status_code, prepared
+
+    async def _fetch_price_map(self) -> dict[str, Any]:
+        response = await self._client.get(f"{self._config.base_url}/api/v5/market/tickers", params={"instType": "SPOT"})
+        response.raise_for_status()
+        payload = response.json()
+        tickers = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(tickers, list):
+            return {}
+        normalized = []
+        for ticker in tickers:
+            inst_id = str(ticker.get("instId") or "").replace("-", "")
+            normalized.append({"instId": inst_id, "last": ticker.get("last")})
+        return build_price_from_tickers(normalized, symbol_key="instId", price_key="last")
+
+    def _price_for_asset(self, asset: str) -> Any:
+        stable = stablecoin_price(asset)
+        if stable is not None:
+            return stable
+        return self._price_map.get(asset.upper())

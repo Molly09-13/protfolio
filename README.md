@@ -118,6 +118,7 @@ order by usd_value desc nulls last, amount desc nulls last;
 - Solana 资产继续通过 Moralis 获取，价格单独补。
 - Binance 现阶段已覆盖 `Spot / Funding / Cross Margin / Isolated Margin / 主账户 Futures / 子账户 Spot / 子账户 Futures`。
 - OKX 现阶段已覆盖 `Trading / Funding / Positions / Asset Valuation / 子账户 Trading / 子账户 Funding`。
+- CEX 明细会用交易所公开行情补 `price_usd/usd_value`，Grafana 默认隐藏 `usd_value < 1` 的小额资产。
 
 ## 后续扩展
 

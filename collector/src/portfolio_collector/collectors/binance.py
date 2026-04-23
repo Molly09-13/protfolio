@@ -11,7 +11,8 @@ import httpx
 
 from ..config import BinanceConfig
 from ..models import CollectionResult, PositionRecord, RawIngestionRecord, SummaryRecord
-from ..utils import STABLECOINS, decimal_or_none, decimal_or_zero, utc_now
+from ..price_utils import build_price_from_tickers, stablecoin_price
+from ..utils import decimal_or_none, decimal_or_zero, utc_now
 from .base import Collector
 
 
@@ -29,6 +30,14 @@ def _list_payload(payload: Any, preferred_keys: tuple[str, ...] = ("data", "bala
     return []
 
 
+def _binance_price_source(asset: str, price: Any) -> str | None:
+    if price is None:
+        return None
+    if stablecoin_price(asset) is not None:
+        return "hardcoded:stablecoin"
+    return "binance:spot_ticker_price"
+
+
 class BinanceCollector(Collector):
     name = "binance"
 
@@ -36,10 +45,12 @@ class BinanceCollector(Collector):
         self._config = config
         self._client = client
         self._subaccount_limit = asyncio.Semaphore(4)
+        self._price_map: dict[str, Any] = {}
 
     async def collect(self) -> CollectionResult:
         result = CollectionResult()
         collected_at = utc_now()
+        self._price_map = await self._fetch_price_map()
 
         permissions, status, params = await self._signed_request("GET", "/sapi/v1/account/apiRestrictions")
         result.raw_ingestions.append(
@@ -273,7 +284,7 @@ class BinanceCollector(Collector):
             amount = net_asset if net_asset is not None else (free + locked - borrowed - interest)
             if amount == 0:
                 continue
-            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            price_usd = self._price_for_asset(asset)
             result.positions.append(
                 PositionRecord(
                     source_type="cex",
@@ -293,7 +304,7 @@ class BinanceCollector(Collector):
                     decimals=None,
                     amount=amount,
                     price_usd=price_usd,
-                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_source=_binance_price_source(asset, price_usd),
                     price_as_of=collected_at if price_usd is not None else None,
                     usd_value=(amount * price_usd) if price_usd is not None else None,
                     is_verified=True,
@@ -322,7 +333,7 @@ class BinanceCollector(Collector):
                 net_asset = decimal_or_none(side.get("netAsset"))
                 if net_asset is None or net_asset == 0:
                     continue
-                price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+                price_usd = self._price_for_asset(asset)
                 result.positions.append(
                     PositionRecord(
                         source_type="cex",
@@ -342,7 +353,7 @@ class BinanceCollector(Collector):
                         decimals=None,
                         amount=net_asset,
                         price_usd=price_usd,
-                        price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                        price_source=_binance_price_source(asset, price_usd),
                         price_as_of=collected_at if price_usd is not None else None,
                         usd_value=(net_asset * price_usd) if price_usd is not None else None,
                         is_verified=True,
@@ -389,7 +400,7 @@ class BinanceCollector(Collector):
             wallet_balance = decimal_or_none(item.get("walletBalance"))
             if not asset or wallet_balance is None or wallet_balance == 0:
                 continue
-            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            price_usd = self._price_for_asset(asset)
             result.positions.append(
                 PositionRecord(
                     source_type="cex",
@@ -409,7 +420,7 @@ class BinanceCollector(Collector):
                     decimals=None,
                     amount=wallet_balance,
                     price_usd=price_usd,
-                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_source=_binance_price_source(asset, price_usd),
                     price_as_of=collected_at if price_usd is not None else None,
                     usd_value=(wallet_balance * price_usd) if price_usd is not None else None,
                     is_verified=True,
@@ -513,7 +524,7 @@ class BinanceCollector(Collector):
             if amount == 0:
                 continue
 
-            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            price_usd = self._price_for_asset(asset)
             usd_value = amount * price_usd if price_usd is not None else None
             rows.append(
                 PositionRecord(
@@ -534,7 +545,7 @@ class BinanceCollector(Collector):
                     decimals=None,
                     amount=amount,
                     price_usd=price_usd,
-                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_source=_binance_price_source(asset, price_usd),
                     price_as_of=collected_at if price_usd is not None else None,
                     usd_value=usd_value,
                     is_verified=True,
@@ -590,7 +601,7 @@ class BinanceCollector(Collector):
             wallet_balance = decimal_or_none(item.get("walletBalance"))
             if not asset or wallet_balance is None or wallet_balance == 0:
                 continue
-            price_usd = decimal_or_none("1") if asset in STABLECOINS else None
+            price_usd = self._price_for_asset(asset)
             result.positions.append(
                 PositionRecord(
                     source_type="cex",
@@ -610,7 +621,7 @@ class BinanceCollector(Collector):
                     decimals=None,
                     amount=wallet_balance,
                     price_usd=price_usd,
-                    price_source="hardcoded:stablecoin" if price_usd is not None else None,
+                    price_source=_binance_price_source(asset, price_usd),
                     price_as_of=collected_at if price_usd is not None else None,
                     usd_value=(wallet_balance * price_usd) if price_usd is not None else None,
                     is_verified=True,
@@ -651,6 +662,20 @@ class BinanceCollector(Collector):
         )
         response.raise_for_status()
         return response.json(), response.status_code, prepared
+
+    async def _fetch_price_map(self) -> dict[str, Any]:
+        response = await self._client.get(f"{self._config.base_url}/api/v3/ticker/price")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            return {}
+        return build_price_from_tickers(payload, symbol_key="symbol", price_key="price")
+
+    def _price_for_asset(self, asset: str) -> Any:
+        stable = stablecoin_price(asset)
+        if stable is not None:
+            return stable
+        return self._price_map.get(asset.upper())
 
     async def _signed_futures_request(
         self,
