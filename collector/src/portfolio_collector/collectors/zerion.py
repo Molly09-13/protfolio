@@ -227,8 +227,9 @@ class ZerionCollector(Collector):
             chain_item = included.get(f"{chain_ref.get('type')}:{chain_ref.get('id')}", {})
             fungible_attrs = fungible.get("attributes") or {}
             chain_attrs = chain_item.get("attributes") or {}
+            embedded_fungible = attributes.get("fungible_info") or {}
             protocol_meta = attributes.get("protocol")
-            app_meta = attributes.get("app")
+            app_meta = attributes.get("app") or attributes.get("application_metadata")
 
             quantity = attributes.get("quantity") or {}
             amount = decimal_or_none(quantity.get("float") or quantity.get("numeric") or quantity.get("value"))
@@ -237,6 +238,7 @@ class ZerionCollector(Collector):
             position_type = str(attributes.get("position_type") or attributes.get("type") or "wallet")
             chain = chain_attrs.get("id") or chain_item.get("id") or chain_ref.get("id")
             symbol = _first_non_empty(
+                embedded_fungible.get("symbol"),
                 fungible_attrs.get("symbol"),
                 attributes.get("symbol"),
                 attributes.get("display_symbol"),
@@ -244,9 +246,11 @@ class ZerionCollector(Collector):
                 _name_from_meta(app_meta),
             )
             name = _first_non_empty(
-                attributes.get("name"),
+                None if attributes.get("name") == "Asset" else attributes.get("name"),
                 attributes.get("display_name"),
+                embedded_fungible.get("name"),
                 fungible_attrs.get("name"),
+                embedded_fungible.get("symbol"),
                 fungible_attrs.get("symbol"),
                 _name_from_meta(protocol_meta),
                 _name_from_meta(app_meta),
@@ -280,6 +284,7 @@ class ZerionCollector(Collector):
                     metadata={
                         "position_type": position_type,
                         "wallet_address": wallet.address,
+                        "embedded_fungible": embedded_fungible,
                         "fungible": fungible_attrs,
                         "chain": chain_attrs,
                         "attributes": attributes,
